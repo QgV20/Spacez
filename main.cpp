@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
+#include <string>
 
 const int SCREEN_WIDTH = 480;
 const int SCREEN_HEIGHT = 640;
@@ -44,7 +45,8 @@ struct Game {
     bool running = true;
     bool shaking = false;
     Uint32 shakeStartTime = 0;
-    int shakeDuration = 300; // rung 300ms
+    int shakeDuration = 300;
+    int score = 0;
 
     bool init();
     void run();
@@ -70,8 +72,9 @@ bool Game::init() {
 
     if (IMG_Init(IMG_INIT_PNG) != IMG_INIT_PNG) return false;
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) return false;
+    if (TTF_Init() == -1) return false;
 
-    player = { {SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT - 80, 50, 50}, loadTexture("player.png"), 5 };
+    player = { {SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT - 80, 70, 70}, loadTexture("player.png"), 5 };
     backgroundTexture = loadTexture("background.png");
     heartTexture = loadTexture("heart.png");
 
@@ -133,7 +136,7 @@ void Game::handleEvents() {
         static Uint32 lastShoot = 0;
         Uint32 now = SDL_GetTicks();
         if (now > lastShoot + 300) {
-            Bullet bullet = { {player.rect.x + player.rect.w/2 - 5, player.rect.y, 10, 20}, loadTexture("bullet.png"), 8 };
+            Bullet bullet = { {player.rect.x + player.rect.w/2 - 5, player.rect.y, 20, 40}, loadTexture("bullet.png"), 8 };
             bullets.push_back(bullet);
             Mix_PlayChannel(-1, shootSound, 0);
             lastShoot = now;
@@ -144,35 +147,34 @@ void Game::handleEvents() {
 void Game::update() {
     Uint32 now = SDL_GetTicks();
 
-    // Update bullets
     for (auto& bullet : bullets)
         bullet.rect.y -= bullet.speed;
     bullets.erase(std::remove_if(bullets.begin(), bullets.end(), [](Bullet& b) {
         return b.rect.y < 0;
     }), bullets.end());
 
-    // Update enemies
     for (auto& enemy : enemies) {
         enemy.rect.y += enemy.speed;
         if (enemy.rect.y + enemy.rect.h >= SCREEN_HEIGHT) {
-            hearts--; // mất 1 máu
+            hearts--;
             SDL_DestroyTexture(enemy.texture);
             enemy.texture = nullptr;
-            startShake(); // rung màn hình
+            startShake();
         }
     }
     enemies.erase(std::remove_if(enemies.begin(), enemies.end(), [](Enemy& e) {
         return e.texture == nullptr;
     }), enemies.end());
 
-    // Spawn enemy mỗi 1000ms
-    if (now - lastEnemySpawnTime > 1000) {
-        Enemy enemy = { {rand() % (SCREEN_WIDTH - 40), 0, 40, 40}, loadTexture("enemy.png"), 1 };
-        enemies.push_back(enemy);
+    if (now - lastEnemySpawnTime > 1000 - std::min(500U, (now / 10000) * 50)) {
+        int numEnemies = std::min(5U, (now / 5000) + 1);
+        for (int i = 0; i < numEnemies; ++i) {
+            Enemy enemy = { {rand() % (SCREEN_WIDTH - 40), 0, 50, 50}, loadTexture("enemy.png"), 1 + (now / 10000) };
+            enemies.push_back(enemy);
+        }
         lastEnemySpawnTime = now;
     }
 
-    // Xử lý va chạm đạn và enemy
     for (size_t i = 0; i < bullets.size(); ++i) {
         for (size_t j = 0; j < enemies.size(); ++j) {
             if (checkCollision(bullets[i].rect, enemies[j].rect)) {
@@ -181,14 +183,13 @@ void Game::update() {
                 bullets.erase(bullets.begin() + i);
                 enemies.erase(enemies.begin() + j);
                 Mix_PlayChannel(-1, explosionSound, 0);
+                score += 100; // Cộng điểm
                 goto skip;
             }
         }
     }
 skip:
     ;
-
-    // Nếu hết máu => thua
     if (hearts <= 0) {
         running = false;
         return;
@@ -207,10 +208,25 @@ void Game::render() {
     for (auto& enemy : enemies)
         SDL_RenderCopy(renderer, enemy.texture, nullptr, &enemy.rect);
 
-    // Vẽ thanh máu
     for (int i = 0; i < hearts; ++i) {
         SDL_Rect heartRect = {10 + i * 40, 10, 30, 30};
         SDL_RenderCopy(renderer, heartTexture, nullptr, &heartRect);
+    }
+
+    // Vẽ điểm số
+    TTF_Font* font = TTF_OpenFont("Arial.ttf", 24);
+    if (font) {
+        SDL_Color white = {255, 255, 255, 255};
+        std::string scoreText = "Score:" + std::to_string(score);
+        SDL_Surface* surfaceMessage = TTF_RenderText_Solid(font, scoreText.c_str(), white);
+        SDL_Texture* message = SDL_CreateTextureFromSurface(renderer, surfaceMessage);
+
+        SDL_Rect message_rect = {10, 50, surfaceMessage->w, surfaceMessage->h};
+        SDL_RenderCopy(renderer, message, nullptr, &message_rect);
+
+        SDL_FreeSurface(surfaceMessage);
+        SDL_DestroyTexture(message);
+        TTF_CloseFont(font);
     }
 
     SDL_RenderPresent(renderer);
@@ -231,6 +247,7 @@ void Game::clean() {
     SDL_DestroyWindow(window);
     IMG_Quit();
     Mix_CloseAudio();
+    TTF_Quit();
     SDL_Quit();
 }
 
@@ -240,36 +257,52 @@ void Game::showGameOver() {
 
     SDL_Color white = {255, 255, 255, 255};
 
-    if (TTF_Init() == -1) {
-        SDL_Log("Failed to init TTF: %s", TTF_GetError());
-        return;
-    }
+    // Font lớn cho GAME OVER
+    TTF_Font* fontBig = TTF_OpenFont("Arial.ttf", 48);
+    // Font nhỏ hơn cho Your Score
+    TTF_Font* fontSmall = TTF_OpenFont("Arial.ttf", 28);
 
-    TTF_Font* font = TTF_OpenFont("Arial.ttf", 48);
-    if (!font) {
+    if (!fontBig || !fontSmall) {
         SDL_Log("Failed to load font: %s", TTF_GetError());
-        TTF_Quit();
         return;
     }
 
-    SDL_Surface* surfaceMessage = TTF_RenderText_Solid(font, "GAME OVER", white);
-    SDL_Texture* message = SDL_CreateTextureFromSurface(renderer, surfaceMessage);
+    // --- Vẽ GAME OVER ---
+    SDL_Surface* surfaceGameOver = TTF_RenderText_Solid(fontBig, "GAME OVER", white);
+    SDL_Texture* textureGameOver = SDL_CreateTextureFromSurface(renderer, surfaceGameOver);
 
-    SDL_Rect message_rect;
-    message_rect.x = SCREEN_WIDTH / 2 - surfaceMessage->w / 2;
-    message_rect.y = SCREEN_HEIGHT / 2 - surfaceMessage->h / 2;
-    message_rect.w = surfaceMessage->w;
-    message_rect.h = surfaceMessage->h;
+    SDL_Rect rectGameOver;
+    rectGameOver.x = SCREEN_WIDTH / 2 - surfaceGameOver->w / 2;
+    rectGameOver.y = SCREEN_HEIGHT / 2 - surfaceGameOver->h;
+    rectGameOver.w = surfaceGameOver->w;
+    rectGameOver.h = surfaceGameOver->h;
 
-    SDL_RenderCopy(renderer, message, nullptr, &message_rect);
+    SDL_RenderCopy(renderer, textureGameOver, nullptr, &rectGameOver);
+
+    SDL_FreeSurface(surfaceGameOver);
+    SDL_DestroyTexture(textureGameOver);
+
+    // --- Vẽ Your Score ---
+    std::string scoreText = "Your Score:" + std::to_string(score);
+    SDL_Surface* surfaceScore = TTF_RenderText_Solid(fontSmall, scoreText.c_str(), white);
+    SDL_Texture* textureScore = SDL_CreateTextureFromSurface(renderer, surfaceScore);
+
+    SDL_Rect rectScore;
+    rectScore.x = SCREEN_WIDTH / 2 - surfaceScore->w / 2;
+    rectScore.y = SCREEN_HEIGHT / 2 + 10;
+    rectScore.w = surfaceScore->w;
+    rectScore.h = surfaceScore->h;
+
+    SDL_RenderCopy(renderer, textureScore, nullptr, &rectScore);
+
     SDL_RenderPresent(renderer);
-
     SDL_Delay(3000);
 
-    SDL_FreeSurface(surfaceMessage);
-    SDL_DestroyTexture(message);
-    TTF_CloseFont(font);
-    TTF_Quit();
+    SDL_FreeSurface(surfaceScore);
+    SDL_DestroyTexture(textureScore);
+
+    TTF_CloseFont(fontBig);
+    TTF_CloseFont(fontSmall);
 }
 
 void Game::run() {

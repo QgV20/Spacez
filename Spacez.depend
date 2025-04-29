@@ -1,0 +1,12 @@
+# depslib dependency file v1.0
+1745852782 source:d:\spacez\main.cpp
+	<SDL.h>
+	<SDL_image.h>
+	<SDL_mixer.h>
+	<SDL_ttf.h>
+	<vector>
+	<algorithm>
+	<cstdlib>
+	<ctime>
+	<string>
+
