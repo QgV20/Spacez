@@ -10,3 +10,14 @@
 	<ctime>
 	<string>
 
+1745939059 source:c:\users\admin\documents\github\spacez\main.cpp
+	<SDL.h>
+	<SDL_image.h>
+	<SDL_mixer.h>
+	<SDL_ttf.h>
+	<vector>
+	<algorithm>
+	<cstdlib>
+	<ctime>
+	<string>
+
