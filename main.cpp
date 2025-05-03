@@ -33,9 +33,7 @@ struct Game {
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     Player player;
-    Player player2;
     std::vector<Bullet> bullets;
-    std::vector<Bullet> bullets2;
     std::vector<Enemy> enemies;
     SDL_Texture* backgroundTexture = nullptr;
     SDL_Texture* heartTexture = nullptr;
@@ -77,11 +75,10 @@ bool Game::init() {
     if (TTF_Init() == -1) return false;
 
     player = { {SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT - 80, 70, 70}, loadTexture("player.png"), 5 };
-    player2 = { {SCREEN_WIDTH/2 + 25, SCREEN_HEIGHT - 160, 70, 70}, loadTexture("player.png"), 5 };
     backgroundTexture = loadTexture("background.png");
     heartTexture = loadTexture("heart.png");
 
-    if (!backgroundTexture || !heartTexture || !player.texture || !player2.texture) return false;
+    if (!backgroundTexture || !heartTexture || !player.texture) return false;
 
     shootSound = Mix_LoadWAV("shoot.wav");
     explosionSound = Mix_LoadWAV("explosion.wav");
@@ -131,8 +128,6 @@ void Game::handleEvents() {
     }
 
     const Uint8* keystates = SDL_GetKeyboardState(NULL);
-
-    // Player 1 control
     if (keystates[SDL_SCANCODE_LEFT] && player.rect.x > 0) player.rect.x -= player.speed;
     if (keystates[SDL_SCANCODE_RIGHT] && player.rect.x + player.rect.w < SCREEN_WIDTH) player.rect.x += player.speed;
     if (keystates[SDL_SCANCODE_UP] && player.rect.y > 0) player.rect.y -= player.speed;
@@ -147,22 +142,6 @@ void Game::handleEvents() {
             lastShoot = now;
         }
     }
-
-    // Player 2 control
-    if (keystates[SDL_SCANCODE_A] && player2.rect.x > 0) player2.rect.x -= player2.speed;
-    if (keystates[SDL_SCANCODE_D] && player2.rect.x + player2.rect.w < SCREEN_WIDTH) player2.rect.x += player2.speed;
-    if (keystates[SDL_SCANCODE_W] && player2.rect.y > 0) player2.rect.y -= player2.speed;
-    if (keystates[SDL_SCANCODE_S] && player2.rect.y + player2.rect.h < SCREEN_HEIGHT) player2.rect.y += player2.speed;
-    if (keystates[SDL_SCANCODE_RSHIFT]) {
-        static Uint32 lastShoot2 = 0;
-        Uint32 now = SDL_GetTicks();
-        if (now > lastShoot2 + 300) {
-            Bullet bullet = { {player2.rect.x + player2.rect.w/2 - 5, player2.rect.y, 20, 40}, loadTexture("bullet.png"), 8 };
-            bullets2.push_back(bullet);
-            Mix_PlayChannel(-1, shootSound, 0);
-            lastShoot2 = now;
-        }
-    }
 }
 
 void Game::update() {
@@ -173,12 +152,6 @@ void Game::update() {
     bullets.erase(std::remove_if(bullets.begin(), bullets.end(), [](Bullet& b) {
         return b.rect.y < 0;
     }), bullets.end());
-
-    for (auto& bullet : bullets2)
-        bullet.rect.y -= bullet.speed;
-    bullets2.erase(std::remove_if(bullets2.begin(), bullets2.end(), [](Bullet& b) {
-        return b.rect.y < 0;
-    }), bullets2.end());
 
     for (auto& enemy : enemies) {
         enemy.rect.y += enemy.speed;
@@ -210,27 +183,13 @@ void Game::update() {
                 bullets.erase(bullets.begin() + i);
                 enemies.erase(enemies.begin() + j);
                 Mix_PlayChannel(-1, explosionSound, 0);
-                score += 100;
+                score += 100; // Cá»™ng Ä‘iá»ƒm
                 goto skip;
             }
         }
     }
 skip:
-
-    for (size_t i = 0; i < bullets2.size(); ++i) {
-        for (size_t j = 0; j < enemies.size(); ++j) {
-            if (checkCollision(bullets2[i].rect, enemies[j].rect)) {
-                SDL_DestroyTexture(bullets2[i].texture);
-                SDL_DestroyTexture(enemies[j].texture);
-                bullets2.erase(bullets2.begin() + i);
-                enemies.erase(enemies.begin() + j);
-                Mix_PlayChannel(-1, explosionSound, 0);
-                score += 100;
-                goto skip2;
-            }
-        }
-    }
-skip2:
+    ;
     if (hearts <= 0) {
         running = false;
         return;
@@ -242,12 +201,10 @@ void Game::render() {
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, backgroundTexture, nullptr, nullptr);
     SDL_RenderCopy(renderer, player.texture, nullptr, &player.rect);
-    SDL_RenderCopy(renderer, player2.texture, nullptr, &player2.rect);
 
     for (auto& bullet : bullets)
         SDL_RenderCopy(renderer, bullet.texture, nullptr, &bullet.rect);
-    for (auto& bullet : bullets2)
-        SDL_RenderCopy(renderer, bullet.texture, nullptr, &bullet.rect);
+
     for (auto& enemy : enemies)
         SDL_RenderCopy(renderer, enemy.texture, nullptr, &enemy.rect);
 
@@ -255,6 +212,7 @@ void Game::render() {
         SDL_Rect heartRect = {10 + i * 40, 10, 30, 30};
         SDL_RenderCopy(renderer, heartTexture, nullptr, &heartRect);
     }
+
 
     TTF_Font* font = TTF_OpenFont("Arial.ttf", 24);
     if (font) {
@@ -280,11 +238,8 @@ void Game::clean() {
     Mix_FreeMusic(backgroundMusic);
     SDL_DestroyTexture(backgroundTexture);
     SDL_DestroyTexture(player.texture);
-    SDL_DestroyTexture(player2.texture);
     SDL_DestroyTexture(heartTexture);
     for (auto& bullet : bullets)
-        SDL_DestroyTexture(bullet.texture);
-    for (auto& bullet : bullets2)
         SDL_DestroyTexture(bullet.texture);
     for (auto& enemy : enemies)
         SDL_DestroyTexture(enemy.texture);
@@ -301,22 +256,43 @@ void Game::showGameOver() {
     SDL_RenderClear(renderer);
 
     SDL_Color white = {255, 255, 255, 255};
+
+    // Font lá»›n cho GAME OVER
     TTF_Font* fontBig = TTF_OpenFont("Arial.ttf", 48);
+    // Font nhá» hÆ¡n cho Your Score
     TTF_Font* fontSmall = TTF_OpenFont("Arial.ttf", 28);
 
-    if (!fontBig || !fontSmall) return;
+    if (!fontBig || !fontSmall) {
+        SDL_Log("Failed to load font: %s", TTF_GetError());
+        return;
+    }
 
+    // --- Váº½ GAME OVER ---
     SDL_Surface* surfaceGameOver = TTF_RenderText_Solid(fontBig, "GAME OVER", white);
     SDL_Texture* textureGameOver = SDL_CreateTextureFromSurface(renderer, surfaceGameOver);
-    SDL_Rect rectGameOver = { SCREEN_WIDTH / 2 - surfaceGameOver->w / 2, SCREEN_HEIGHT / 2 - surfaceGameOver->h, surfaceGameOver->w, surfaceGameOver->h };
+
+    SDL_Rect rectGameOver;
+    rectGameOver.x = SCREEN_WIDTH / 2 - surfaceGameOver->w / 2;
+    rectGameOver.y = SCREEN_HEIGHT / 2 - surfaceGameOver->h;
+    rectGameOver.w = surfaceGameOver->w;
+    rectGameOver.h = surfaceGameOver->h;
+
     SDL_RenderCopy(renderer, textureGameOver, nullptr, &rectGameOver);
+
     SDL_FreeSurface(surfaceGameOver);
     SDL_DestroyTexture(textureGameOver);
 
-    std::string scoreText = "Your Score: " + std::to_string(score);
+    // --- Váº½ Your Score ---
+    std::string scoreText = "Your Score:" + std::to_string(score);
     SDL_Surface* surfaceScore = TTF_RenderText_Solid(fontSmall, scoreText.c_str(), white);
     SDL_Texture* textureScore = SDL_CreateTextureFromSurface(renderer, surfaceScore);
-    SDL_Rect rectScore = { SCREEN_WIDTH / 2 - surfaceScore->w / 2, SCREEN_HEIGHT / 2 + 10, surfaceScore->w, surfaceScore->h };
+
+    SDL_Rect rectScore;
+    rectScore.x = SCREEN_WIDTH / 2 - surfaceScore->w / 2;
+    rectScore.y = SCREEN_HEIGHT / 2 + 10;
+    rectScore.w = surfaceScore->w;
+    rectScore.h = surfaceScore->h;
+
     SDL_RenderCopy(renderer, textureScore, nullptr, &rectScore);
 
     SDL_RenderPresent(renderer);
@@ -324,6 +300,7 @@ void Game::showGameOver() {
 
     SDL_FreeSurface(surfaceScore);
     SDL_DestroyTexture(textureScore);
+
     TTF_CloseFont(fontBig);
     TTF_CloseFont(fontSmall);
 }
@@ -344,5 +321,6 @@ int main(int argc, char* argv[]) {
         game.run();
     }
     game.clean();
-    return 0;
+    return 0;;
 }
+
