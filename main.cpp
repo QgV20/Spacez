@@ -29,18 +29,26 @@ struct Enemy {
     int speed;
 };
 
+struct EnemyBullet {
+    SDL_Rect rect;
+    SDL_Texture* texture;
+    int speed;
+};
+
 struct Game {
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     Player player;
     std::vector<Bullet> bullets;
     std::vector<Enemy> enemies;
+    std::vector<EnemyBullet> enemyBullets;
     SDL_Texture* backgroundTexture = nullptr;
     SDL_Texture* heartTexture = nullptr;
     Mix_Chunk* shootSound = nullptr;
     Mix_Chunk* explosionSound = nullptr;
     Mix_Music* backgroundMusic = nullptr;
     Uint32 lastEnemySpawnTime = 0;
+    Uint32 lastEnemyShootTime = 0;
     int hearts = 5;
     bool running = true;
     bool shaking = false;
@@ -166,15 +174,48 @@ void Game::update() {
         return e.texture == nullptr;
     }), enemies.end());
 
-    if (now - lastEnemySpawnTime > 1000 - std::min(500U, (now / 10000) * 50)) {
-        int numEnemies = std::min(5U, (now / 5000) + 1);
+    if (now - lastEnemySpawnTime > 2000 - std::min(1000U, (now / 20000) * 30)) {
+        int numEnemies = std::min(3U, (now / 15000) + 1);
         for (int i = 0; i < numEnemies; ++i) {
-            Enemy enemy = { {rand() % (SCREEN_WIDTH - 40), 0, 50, 50}, loadTexture("enemy.png"), 1 + (now / 10000) };
+            Enemy enemy = { {rand() % (SCREEN_WIDTH - 40), 0, 50, 50}, loadTexture("enemy.png"), 1 + (now / 20000) };
             enemies.push_back(enemy);
         }
         lastEnemySpawnTime = now;
     }
 
+    // Enemy shooting
+    if (now > lastEnemyShootTime + 2000) {
+        for (auto& enemy : enemies) {
+            EnemyBullet ebullet = {
+                {enemy.rect.x + enemy.rect.w / 2 - 5, enemy.rect.y + enemy.rect.h, 30, 40 },
+                loadTexture("enemy_bullet.png"),
+                6
+            };
+            enemyBullets.push_back(ebullet);
+        }
+        lastEnemyShootTime = now;
+    }
+
+    // Update enemy bullets
+    for (auto& ebullet : enemyBullets)
+        ebullet.rect.y += ebullet.speed;
+
+    enemyBullets.erase(std::remove_if(enemyBullets.begin(), enemyBullets.end(), [](EnemyBullet& b) {
+        return b.rect.y > SCREEN_HEIGHT;
+    }), enemyBullets.end());
+
+    for (size_t i = 0; i < enemyBullets.size(); ++i) {
+        if (checkCollision(enemyBullets[i].rect, player.rect)) {
+            Mix_PlayChannel(-1, explosionSound, 0);
+            SDL_DestroyTexture(enemyBullets[i].texture);
+            enemyBullets.erase(enemyBullets.begin() + i);
+            hearts--;
+            startShake();
+            break;
+        }
+    }
+
+    // Bullet vs Enemy
     for (size_t i = 0; i < bullets.size(); ++i) {
         for (size_t j = 0; j < enemies.size(); ++j) {
             if (checkCollision(bullets[i].rect, enemies[j].rect)) {
@@ -183,7 +224,7 @@ void Game::update() {
                 bullets.erase(bullets.begin() + i);
                 enemies.erase(enemies.begin() + j);
                 Mix_PlayChannel(-1, explosionSound, 0);
-                score += 100; // Cộng điểm
+                score += 100;
                 goto skip;
             }
         }
@@ -208,11 +249,13 @@ void Game::render() {
     for (auto& enemy : enemies)
         SDL_RenderCopy(renderer, enemy.texture, nullptr, &enemy.rect);
 
+    for (auto& ebullet : enemyBullets)
+        SDL_RenderCopy(renderer, ebullet.texture, nullptr, &ebullet.rect);
+
     for (int i = 0; i < hearts; ++i) {
         SDL_Rect heartRect = {10 + i * 40, 10, 30, 30};
         SDL_RenderCopy(renderer, heartTexture, nullptr, &heartRect);
     }
-
 
     TTF_Font* font = TTF_OpenFont("Arial.ttf", 24);
     if (font) {
@@ -243,6 +286,8 @@ void Game::clean() {
         SDL_DestroyTexture(bullet.texture);
     for (auto& enemy : enemies)
         SDL_DestroyTexture(enemy.texture);
+    for (auto& ebullet : enemyBullets)
+        SDL_DestroyTexture(ebullet.texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     IMG_Quit();
@@ -257,50 +302,27 @@ void Game::showGameOver() {
 
     SDL_Color white = {255, 255, 255, 255};
 
-    // Font lớn cho GAME OVER
     TTF_Font* fontBig = TTF_OpenFont("Arial.ttf", 48);
-    // Font nhỏ hơn cho Your Score
     TTF_Font* fontSmall = TTF_OpenFont("Arial.ttf", 28);
 
-    if (!fontBig || !fontSmall) {
-        SDL_Log("Failed to load font: %s", TTF_GetError());
-        return;
-    }
+    if (!fontBig || !fontSmall) return;
 
-    // --- Vẽ GAME OVER ---
     SDL_Surface* surfaceGameOver = TTF_RenderText_Solid(fontBig, "GAME OVER", white);
     SDL_Texture* textureGameOver = SDL_CreateTextureFromSurface(renderer, surfaceGameOver);
-
-    SDL_Rect rectGameOver;
-    rectGameOver.x = SCREEN_WIDTH / 2 - surfaceGameOver->w / 2;
-    rectGameOver.y = SCREEN_HEIGHT / 2 - surfaceGameOver->h;
-    rectGameOver.w = surfaceGameOver->w;
-    rectGameOver.h = surfaceGameOver->h;
-
+    SDL_Rect rectGameOver = {SCREEN_WIDTH/2 - surfaceGameOver->w/2, SCREEN_HEIGHT/2 - surfaceGameOver->h, surfaceGameOver->w, surfaceGameOver->h};
     SDL_RenderCopy(renderer, textureGameOver, nullptr, &rectGameOver);
-
     SDL_FreeSurface(surfaceGameOver);
     SDL_DestroyTexture(textureGameOver);
 
-    // --- Vẽ Your Score ---
     std::string scoreText = "Your Score:" + std::to_string(score);
     SDL_Surface* surfaceScore = TTF_RenderText_Solid(fontSmall, scoreText.c_str(), white);
     SDL_Texture* textureScore = SDL_CreateTextureFromSurface(renderer, surfaceScore);
-
-    SDL_Rect rectScore;
-    rectScore.x = SCREEN_WIDTH / 2 - surfaceScore->w / 2;
-    rectScore.y = SCREEN_HEIGHT / 2 + 10;
-    rectScore.w = surfaceScore->w;
-    rectScore.h = surfaceScore->h;
-
+    SDL_Rect rectScore = {SCREEN_WIDTH/2 - surfaceScore->w/2, SCREEN_HEIGHT/2 + 10, surfaceScore->w, surfaceScore->h};
     SDL_RenderCopy(renderer, textureScore, nullptr, &rectScore);
-
     SDL_RenderPresent(renderer);
     SDL_Delay(3000);
-
     SDL_FreeSurface(surfaceScore);
     SDL_DestroyTexture(textureScore);
-
     TTF_CloseFont(fontBig);
     TTF_CloseFont(fontSmall);
 }
@@ -321,5 +343,5 @@ int main(int argc, char* argv[]) {
         game.run();
     }
     game.clean();
-    return 0;;
+    return 0;
 }
